@@ -1,0 +1,8 @@
+torch>=2.2
+transformers>=4.56
+datasets>=2.20
+peft>=0.13.0
+accelerate>=0.31
+bitsandbytes>=0.43.3     # optional; NVIDIA-only; skip on CPU/MPS
+pillow>=10.3
+tqdm

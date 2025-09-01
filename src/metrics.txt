@@ -1,0 +1,18 @@
+=== COCO Captioning — Scorecard ===
+CIDEr (↑)        : 0.560
+CLIPScore (↑)    : 30.830
+BLEU-4 (↑)       : 15.73
+METEOR (↑)       : 47.84
+ROUGE-L (↑)      : 45.18
+BERTScore-F1 (↑) : 91.73
+Evaluated 1000 images from split='test'.
+
+
+=== COCO Captioning — Scorecard ===
+CIDEr (↑)        : 0.540
+CLIPScore (↑)    : 31.068
+BLEU-4 (↑)       : 16.01
+METEOR (↑)       : 48.28
+ROUGE-L (↑)      : 45.11
+BERTScore-F1 (↑) : 91.80
+Evaluated 1000 images from split='validation'.
