@@ -180,6 +180,39 @@ The merged model in `--save_dir` can be pushed to the Hub or loaded with standar
   <img alt="Task" src="https://img.shields.io/badge/Task-Image%20Captioning-333333.svg">
 </p>
 
+## 📉 Loss Curve
+
+The following plot shows the training loss progression:
+
+![Training Loss Curve](assets/train_loss.svg)
+
+The following plot shows the validation loss progression:
+![Training Loss Curve](assets/eval_loss.svg)
+
+*(SVG file generated during training(by tensorboard logs) and stored under `assets/`)*
+
+## 🖥️ Training Hardware & Environment
+
+- **Device:** Laptop (Windows, WDDM driver model)  
+- **GPU:** NVIDIA GeForce **RTX 3080 Ti Laptop GPU** (16 GB VRAM)  
+- **Driver:** **576.52**  
+- **CUDA (driver):** **12.9**  
+- **PyTorch:** **2.8.0+cu129**  
+- **CUDA available:** ✅ 
+
+
+## 📊 Training Logs & Metrics
+
+- **Total FLOPs (training):** `26,387,224,652,152,830`  
+- **Training runtime:** `5,664.0825` seconds  
+- **Logging:** TensorBoard-compatible logs in `...src/outputs/smolvlm-coco-lora/logs`  
+
+You can monitor training live with:
+
+```bash
+tensorboard --logdir ...src/outputs/smolvlm-coco-lora/logs
+```
+
 ## Metrics
 
 - Strong **semantic alignment** (BERTScore-F1 ≈ **91.8** on *val*), and balanced lexical overlap (BLEU-4 ≈ **16.0**).
@@ -188,7 +221,7 @@ The merged model in `--save_dir` can be pushed to the Hub or loaded with standar
 
 ---
 
-## 📊 Scorecard
+## 📊 Score card (on subsample of main data)
 
 **All scores increase with higher values (↑).** For visualization, `CIDEr` is shown ×100 in the chart to match the 0–100 scale of other metrics.
 
@@ -238,6 +271,157 @@ python eval_caption_metric.py
 - **SmolVLM‑Instruct** — a compact, open vision–language model designed for efficient fine‑tuning and on‑device use.
 
 ---
+
+
+## SageMaker: Train, Deploy, and Invoke (Image Captioning VLM)
+
+This add-on lets you **fine‑tune and serve** the Vision‑Language model in this repo on **Amazon SageMaker** using the official Hugging Face Deep Learning Containers (DLCs). It wraps your existing training entry point and provides an inference handler + endpoint utilities.
+
+```
+sagemaker/
+  train_sm_estimator.py     # launch training (wraps your train_vlm_sft.py)
+  deploy_sm_endpoint.py     # deploy a real-time endpoint
+  test_invoke.py            # send a sample request (JSON) to the endpoint
+inference/
+  inference.py              # SageMaker inference handler (loads base + LoRA)
+  requirements.txt          # optional extra deps for hosting (e.g., peft)
+```
+
+---
+
+### Prerequisites
+
+- **AWS account** with permissions to use SageMaker, S3, ECR (read), and CloudWatch Logs.
+- **Execution role ARN** (e.g., `arn:aws:iam::<acct>:role/<SageMakerRole>`).
+- **Python packages** on your local machine:  
+  ```bash
+  pip install sagemaker boto3
+  ```
+- (Optional) **Hugging Face Hub token** if your base model or dataset is gated: set `HUGGING_FACE_HUB_TOKEN` in your environment.
+
+> Tips
+> - Training jobs read/write from S3 automatically. Artifacts saved under `/opt/ml/model` are **auto‑uploaded** by SageMaker at the end of the job.
+> - For **air‑gapped/VPC‑only** training, stage datasets to S3 and pass them as input channels (see “VPC / no‑internet training” below).
+
+---
+
+### Quickstart
+
+#### 1) Train (LoRA/QLoRA)
+
+From repo root:
+```bash
+python sagemaker/train_sm_estimator.py   --role arn:aws:iam::<acct>:role/<SageMakerRole>   --instance_type ml.g5.2xlarge   --base_model_id HuggingFaceTB/SmolVLM-Instruct   --dataset_id jxie/coco_captions   --epochs 1 --batch_size 2 --grad_accum 8   --max_seq_len 1024 --image_longest_edge 1536   --use_qlora true
+```
+
+What it does:
+- Starts a **Hugging Face Estimator** training job on SageMaker.
+- Runs your repository’s training entry point (`train_vlm_sft.py`).
+- Saves outputs to **`/opt/ml/model`** so SageMaker tars and uploads them to S3 as `model.tar.gz`—ready for deployment.
+
+**After the job completes**, copy the S3 path printed by the launcher (e.g., `s3://<bucket>/<prefix>/output/model.tar.gz`).
+
+> ✅ _Why `/opt/ml/model`?_ SageMaker treats this path as the **final model artifact** location and auto‑uploads it to S3 at job end.
+
+---
+
+#### 2) Deploy a real‑time endpoint
+
+```bash
+python sagemaker/deploy_sm_endpoint.py   --role arn:aws:iam::<acct>:role/<SageMakerRole>   --model_data s3://<bucket>/<prefix>/output/model.tar.gz   --base_model_id HuggingFaceTB/SmolVLM-Instruct   --endpoint_name vlm-captioning   --instance_type ml.g5.2xlarge
+```
+
+This uses the Hugging Face **Inference DLC** plus our custom `inference/inference.py`, which:
+- loads the base VLM (`AutoModelForVision2Seq`) and `AutoProcessor`,
+- applies the trained **LoRA** adapter from the artifact (if present),
+- exposes a JSON API for image captioning.
+
+You can tweak generation defaults via environment variables in `deploy_sm_endpoint.py` (e.g., `IMAGE_LONGEST_EDGE`, `HF_HUB_ENABLE_HF_TRANSFER`).
+
+---
+
+#### 3) Invoke the endpoint
+
+**Helper script:**
+```bash
+python sagemaker/test_invoke.py   --endpoint_name vlm-captioning   --image_url https://images.cocodataset.org/val2014/COCO_val2014_000000522418.jpg   --prompt "Give a concise caption."
+```
+
+**Direct (Boto3) example:**
+```python
+import json, boto3
+payload = {"image_url": "https://...jpg", "prompt": "Give a concise caption.", "max_new_tokens": 64}
+smrt = boto3.client("sagemaker-runtime")
+resp = smrt.invoke_endpoint(
+    EndpointName="vlm-captioning",
+    ContentType="application/json",
+    Body=json.dumps(payload).encode("utf-8"),
+)
+print(resp["Body"].read().decode("utf-8"))
+```
+
+**Request schema (`application/json`):**
+```json
+{
+  "image_url": "https://...jpg",   // or "image": "<base64>",
+  "prompt": "Give a concise caption.",
+  "max_new_tokens": 64,
+  "temperature": 0.2,
+  "top_p": 0.9
+}
+```
+
+**Response:**
+```json
+{ "generated_text": "..." }
+```
+
+---
+
+### VPC / no‑internet training (optional)
+
+- **Stage** your dataset(s) to S3.
+- Pass S3 channels to the Estimator (see `train_sm_estimator.py` or adapt it to call `estimator.fit({"train": "s3://..."})`).  
+  Inside the container, SageMaker mounts channels at `/opt/ml/input/data/<channel>`, and sets env vars like `SM_CHANNEL_TRAIN`.
+- Ensure your script reads from those paths and still **writes final artifacts** to `/opt/ml/model`.
+
+---
+
+### Instance sizing
+
+- **Training**: `ml.g5.2xlarge` (1×A10) is a good starting point for LoRA/QLoRA on SmolVLM. Scale up if you increase image size/batch.
+- **Inference**: `ml.g5.*` GPUs are typical. For cost‑sensitive setups, lower `IMAGE_LONGEST_EDGE` (e.g., 1152) or use smaller instances.
+
+---
+
+### Troubleshooting
+
+- **Missing Python packages on hosting**  
+  Put them in `inference/requirements.txt`. These will be installed by the container at deploy time.
+- **Permission errors**  
+  The execution role must allow SageMaker + S3 read/write access to your artifact bucket/prefix.
+- **Model not found / gated**  
+  Ensure access on the Hugging Face Hub and (if needed) set `HUGGING_FACE_HUB_TOKEN` in the environment.
+- **Instance not available in region**  
+  Change `--instance_type` or deploy in a region with available GPU capacity.
+
+---
+
+### Cleanup (stop charges)
+
+```bash
+python
+import boto3
+smr = boto3.client("sagemaker-runtime")
+sm = boto3.client("sagemaker")
+endpoint_name = "vlm-captioning"
+# Delete endpoint (stops billing)
+sm.delete_endpoint(EndpointName=endpoint_name)
+# Optionally clean up the config and model objects by name, if you recorded them.
+# sm.delete_endpoint_config(EndpointConfigName="...")
+# sm.delete_model(ModelName="...")
+print("Deleted endpoint:", endpoint_name)
+```
 
 ## 🔍 Observations
 
