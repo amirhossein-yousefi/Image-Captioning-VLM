@@ -4,7 +4,7 @@
 > Minimal, practical pipeline to fine‑tune an open **Vision‑Language Model (VLM)** for **image captioning** using LoRA/QLoRA on the **COCO Captions** dataset, then run inference and evaluate — all with a lightweight PyTorch + 🤗 Transformers stack.
 
 <p align="center">
-  <img alt="SmolVLM" src="https://huggingface.co/HuggingFaceTB/SmolVLM-Instruct/resolve/main/smolvlm_card.png" width="520">
+  <img alt="SmolVLM" src="https://img.shields.io/badge/Model-SmolVLM--Instruct-5b8def.svg" width="520">
   <br>
   <em>Powered by <a href="https://huggingface.co/HuggingFaceTB/SmolVLM-Instruct">SmolVLM‑Instruct</a> — an efficient, Apache‑2.0 licensed VLM designed for on‑device use.</em>
 </p>
@@ -163,6 +163,87 @@ The merged model in `--save_dir` can be pushed to the Hub or loaded with standar
 - Typical inference VRAM for SmolVLM‑Instruct is ~**5 GB** (varies by attention backend/precision).
 - Training with LoRA + frozen vision tower runs comfortably on **8–12 GB** GPUs; use QLoRA if needed.
 - Logs are written under `outputs/<run>/logs` (TensorBoard event files). Use `tensorboard --logdir outputs`.
+
+---
+
+
+
+## 📸 Image Captioning with SmolVLM — COCO Results
+
+> A concise experiment report for fine-tuning **SmolVLM-Instruct** on **MS COCO Captions** using the training code from
+> [`amirhossein-yousefi/Image-Captioning-VLM`](https://github.com/amirhossein-yousefi/Image-Captioning-VLM).
+
+<p align="left">
+  <a href="https://huggingface.co/HuggingFaceTB/SmolVLM-Instruct"><img alt="Model: SmolVLM-Instruct" src="https://img.shields.io/badge/Model-SmolVLM--Instruct-5b8def.svg"></a>
+  <a href="https://cocodataset.org/"><img alt="Dataset: MS COCO Captions" src="https://img.shields.io/badge/Dataset-MS%20COCO%20Captions-11a36a.svg"></a>
+  <img alt="Eval images" src="https://img.shields.io/badge/Eval-1000%20test%20%7C%201000%20val-8e44ad.svg">
+  <img alt="Task" src="https://img.shields.io/badge/Task-Image%20Captioning-333333.svg">
+</p>
+
+## Metrics
+
+- Strong **semantic alignment** (BERTScore-F1 ≈ **91.8** on *val*), and balanced lexical overlap (BLEU-4 ≈ **16.0**).
+- **CIDEr** is slightly higher on *test* (0.560) vs. *val* (0.540); other metrics are near parity across splits.
+- Trained & evaluated with the minimal pipeline in the repo (LoRA/QLoRA-ready).
+
+---
+
+## 📊 Scorecard
+
+**All scores increase with higher values (↑).** For visualization, `CIDEr` is shown ×100 in the chart to match the 0–100 scale of other metrics.
+
+| Split        | CIDEr | CLIPScore | BLEU-4 | METEOR | ROUGE-L | BERTScore-F1 | Images |
+|:-------------|------:|----------:|-------:|-------:|--------:|-------------:|------:|
+| **Test**      | 0.560 | 30.830    | 15.73  | 47.84  | 45.18   | 91.73        | 1000  |
+| **Validation**| 0.540 | 31.068    | 16.01  | 48.28  | 45.11   | 91.80        | 1000  |
+
+
+### Quick read on the metrics
+
+- **CIDEr** — consensus with human captions; higher is better for human-like phrasing (0–>1 typical).  
+- **CLIPScore** — reference-free image–text compatibility via CLIP’s cosine similarity (commonly rescaled).  
+- **BLEU‑4** — 4‑gram precision with brevity penalty (lexical match).  
+- **METEOR** — unigram match with stemming/synonyms, emphasizes recall.  
+- **ROUGE‑L** — longest common subsequence overlap (structure/recall‑leaning).  
+- **BERTScore‑F1** — semantic similarity using contextual embeddings.
+
+> **Note:** Some toolkits (e.g., COCO evaluation) report BLEU/METEOR/ROUGE/CIDEr on a 0–100 scale; others keep them in 0–1. This report keeps the values exactly as produced by the evaluation script and only rescales CIDEr in the chart for readability.
+
+---
+
+## 🧪 Experiment Card (Reproducible)
+
+This run used the open recipe from the training repo (frozen vision tower; LoRA/QLoRA-ready):
+
+```bash
+# 0) Setup
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt   # bitsandbytes needed for QLoRA; else set --use_qlora false
+
+# 1) Fine-tune (example)
+python train_vlm_sft.py   --base_model_id HuggingFaceTB/SmolVLM-Instruct   --dataset_id jxie/coco_captions   --output_dir outputs/smolvlm-coco-lora   --epochs 1 --batch_size 2 --grad_accum 8   --max_seq_len 1024 --image_longest_edge 1536
+
+# 2) Inference (single image)
+python inference_vlm.py   --base_model_id HuggingFaceTB/SmolVLM-Instruct   --adapter_dir outputs/smolvlm-coco-lora   --image https://images.cocodataset.org/val2014/COCO_val2014_000000522418.jpg   --prompt "Give a concise caption."
+
+# 3) Evaluation (COCO-style metrics)
+python eval_caption_metric.py
+```
+
+### Dataset
+- **MS COCO Captions** — 5 human captions per image; widely used for captioning benchmarks.
+- Hugging Face dataset used in the training command: `jxie/coco_captions`.
+
+### Model
+- **SmolVLM‑Instruct** — a compact, open vision–language model designed for efficient fine‑tuning and on‑device use.
+
+---
+
+## 🔍 Observations
+
+- **Generalization:** *Validation* is virtually on par with *test* across metrics; **CIDEr** is slightly higher on test (+0.02 absolute), while **CLIPScore**, **BLEU‑4**, **METEOR**, and **BERTScore‑F1** are marginally higher on validation.
+- **Semantics vs. lexicon:** High **BERTScore‑F1** (~91.8) indicates strong semantic alignment, even when **BLEU‑4** remains moderate—typical for open‑ended captioning where diverse yet correct phrasings exist.
+- **Next steps:** Try more epochs / larger batch for CIDEr gains, report **SPICE** as an additional structural metric, and explore QLoRA vs. LoRA headroom.
 
 ---
 
